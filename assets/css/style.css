@@ -128,6 +128,14 @@ body {
   font-size: 18px;
 }
 
+
+.lower-half {
+    height: 50%; /* Set the height of the lower half to 50% of the viewport height */
+    background-image: url('/assets/img/profile_pic.jpeg'); /* Set the background image for the lower half */
+    background-size: cover; /* Adjust the background size */
+    background-position: center; /* Center the background image */
+}
+
 /* body {
   color: black;
   font-size: 18px;
