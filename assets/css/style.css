@@ -596,22 +596,20 @@ small {
   margin-bottom: 20px;
 }
 
-.video-container {
-  width: 50%; /* Adjust the width as needed */
+.publi_child{
+  display : inline-block;
+  vertical-align: middle;
 }
 
-video {
+.publi_child:first-child{
   width: 30%;
-  height: auto;
+  height:auto;
 }
 
-.details {
-  margin-top: 130px;
-  width: 50%; /* Adjust the width as needed */
-  padding-left: 20px; /* Add padding between the video and details */
+.publi_child:second-child{
   font-size: larger;
   font-family: Arial, Helvetica, sans-serif;
-  float: right ;
+  
 }
 
 @media (min-width: 1200px) {
