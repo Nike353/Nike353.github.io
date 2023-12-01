@@ -590,6 +590,29 @@ small {
   float: right;
 } */
 
+
+.publication {
+  display: flex;
+  margin-bottom: 20px;
+}
+
+.video-container {
+  width: 50%; /* Adjust the width as needed */
+}
+
+video {
+  width: 100%;
+  height: auto;
+}
+
+.details {
+  margin-top: 130px;
+  width: 50%; /* Adjust the width as needed */
+  padding-left: 20px; /* Add padding between the video and details */
+  font-size: larger;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
 @media (min-width: 1200px) {
   #experience .container {
     width: 860px;
