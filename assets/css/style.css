@@ -582,13 +582,13 @@ small {
   color: #FFFFFF;
 }
 
-.main_pic{
-  margin-top: -560px;
+/* .main_pic{
+  margin-top: -1060px;
   margin-right: 330px;
   height: auto;
-  width: 8px; /* Adjust the width as needed */
+  width: 8px; 
   float: right;
-}
+} */
 
 @media (min-width: 1200px) {
   #experience .container {
