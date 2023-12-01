@@ -584,8 +584,9 @@ small {
 
 .main_pic{
   margin-top: -560px;
-  margin-right: 230px;
-  max-width: 80px; /* Adjust the width as needed */
+  margin-right: 330px;
+  height: auto;
+  width: 8px; /* Adjust the width as needed */
   float: right;
 }
 
