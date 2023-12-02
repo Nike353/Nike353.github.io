@@ -603,17 +603,18 @@ small {
   vertical-align: middle;
 }
 
-.publi_child:first-child{
-  padding-left: 50px;
-  width: 30%;
+.publi_child video{
+  padding-left: 100px;
+  width: 400px;
   height:auto;
 }
 
-/* .publi_child:second-child{
+.publi_child details{
+  padding-left: 100px;
   font-size: larger;
   font-family: Arial, Helvetica, sans-serif;
 
-} */
+}
 
 @media (min-width: 1200px) {
   #experience .container {
