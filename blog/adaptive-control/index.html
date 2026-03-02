@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>Why Bother with Adaptive Control in the Age of Robot Learning? — Nikhil Sobanbabu</title>
+  <meta name="author" content="Nikhil Sobanbabu">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A physics-first look at the sim2real gap and why adaptive control remains essential for contact-rich systems, legged robots, and dexterous manipulation.">
+  <link rel="shortcut icon" href="../../images/favicon/iron.ico" type="image/x-icon">
+  <link rel="stylesheet" type="text/css" href="../../stylesheet.css">
+  <link rel="stylesheet" type="text/css" href="../blog.css">
+
+  <!-- KaTeX for math rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {
+      delimiters: [
+        {left: '$$', right: '$$', display: true},
+        {left: '$', right: '$', display: false}
+      ]
+    });"></script>
+
+  <style>
+    /* Small tweaks specific to this post */
+    .post-body .katex-display { margin: 1.4em 0; overflow-x: auto; }
+  </style>
+</head>
+<body class="blog-body">
+
+  <!-- Site navigation -->
+  <nav class="site-nav">
+    <div class="site-nav-inner">
+      <a href="../../index.html" class="nav-home">Nikhil Sobanbabu</a>
+      <span class="sep">/</span>
+      <a href="../index.html">Blog</a>
+      <span class="sep">/</span>
+      <span class="nav-current">Adaptive Control &amp; Sim2Real — Part 1</span>
+    </div>
+  </nav>
+
+  <div class="blog-page">
+    <div class="post-layout">
+
+      <!-- ============================================================
+           LEFT: Table of Contents
+           ============================================================ -->
+      <aside class="toc-sidebar" aria-label="Table of contents">
+        <div class="toc-label">Contents</div>
+        <ul class="toc-list" id="toc">
+          <li><a href="#intro">The Uncomfortable Question</a></li>
+          <li><a href="#gap">The Sim2Real Gap Is Not Noise</a></li>
+          <li class="toc-h3"><a href="#inertia">Inertia &amp; Actuator Errors</a></li>
+          <li class="toc-h3"><a href="#contact">Contact Model Failures</a></li>
+          <li class="toc-h3"><a href="#friction">Friction Model Failures</a></li>
+          <li><a href="#domrand">What Domain Randomization Can and Cannot Do</a></li>
+          <li><a href="#adaptive">What Adaptive Control Offers</a></li>
+          <li class="toc-h3"><a href="#l1">L1 Adaptive Control</a></li>
+          <li><a href="#contact-rich">Why Contact-Rich Systems Are Special</a></li>
+          <li><a href="#hybrid">Learning + Adaptive Control</a></li>
+          <li><a href="#open">Open Questions</a></li>
+          <li><a href="#conclusion">Conclusion</a></li>
+          <li><a href="#references">References</a></li>
+        </ul>
+      </aside>
+
+      <!-- ============================================================
+           RIGHT: Post content
+           ============================================================ -->
+      <article class="post-content-col">
+
+        <!-- Post header -->
+        <header class="post-header">
+          <div class="post-series">Series: Adaptive Control &amp; Sim2Real · Part 1</div>
+          <h1>Why Bother with Adaptive Control in the Age of Robot Learning?</h1>
+          <p class="post-subtitle">
+            A physics-first argument for why structured uncertainty in contact-rich systems
+            demands more than domain randomization.
+          </p>
+          <div class="post-meta">
+            <span>Nikhil Sobanbabu</span>
+            <span class="sep">·</span>
+            <span>March 2026</span>
+            <span class="sep">·</span>
+            <span>~15 min read</span>
+          </div>
+          <div class="post-tags">
+            <span class="tag">sim2real</span>
+            <span class="tag">adaptive control</span>
+            <span class="tag">legged robots</span>
+            <span class="tag">dexterous manipulation</span>
+            <span class="tag">physics</span>
+          </div>
+        </header>
+
+        <!-- Post body -->
+        <div class="post-body">
+
+          <!-- ========== 1. INTRO ========== -->
+          <h2 id="intro">1. The Uncomfortable Question</h2>
+
+          <p>
+            If you have been following the robot learning literature over the past few years, you have
+            seen some genuinely remarkable things: quadrupeds parkour over obstacles, humanoids walk
+            out of labs onto outdoor terrain, dexterous hands manipulate cables and deformable objects.
+            Almost all of these successes share a common recipe: train a policy in simulation, randomize
+            the physics parameters over some distribution, then deploy in the real world. The results
+            are impressive enough that one might reasonably ask:
+          </p>
+
+          <div class="callout warning">
+            <div class="callout-label">The question this post addresses</div>
+            If domain randomization gets us this far, do we still need to care about adaptive control?
+          </div>
+
+          <p>
+            I want to argue that the answer is <em>yes</em>, and that understanding why requires
+            thinking carefully about what kind of problem the sim2real gap actually is. This is not
+            an argument that learning is insufficient — rather, it is an argument that the two
+            approaches are solving structurally different problems and are most powerful in
+            combination. But to make that case, I need to first be precise about what the sim2real
+            gap really looks like, especially for contact-rich systems.
+          </p>
+
+          <!-- ========== 2. THE GAP ========== -->
+          <h2 id="gap">2. The Sim2Real Gap Is Not Noise</h2>
+
+          <p>
+            The sim2real gap is commonly framed as a distributional shift problem: your simulator
+            samples from one distribution of physical parameters and environments, and the real world
+            is a sample from a different, unknown distribution. Domain randomization (DR) addresses
+            this by broadening the training distribution so that the real world plausibly falls within
+            its support.
+          </p>
+
+          <p>
+            This framing is useful but incomplete. The sim2real gap has <strong>structure</strong>.
+            The errors you encounter at deployment time are not i.i.d. noise — they are
+            <em>systematic, correlated, and physically interpretable</em>. Understanding this structure
+            is what adaptive control is designed to exploit.
+          </p>
+
+          <h3 id="inertia">Systematic Inertia and Actuator Errors</h3>
+
+          <p>
+            Rigid body inertia tensors are notoriously difficult to measure accurately. CAD models
+            assume uniform density distributions that do not reflect cables, wiring harnesses,
+            PCBs, or gearbox mass. When a leg strikes the ground, the error in your inertia model
+            produces a systematic tracking error — not random noise, but a consistent bias that
+            depends on the current configuration and velocity.
+          </p>
+
+          <p>
+            Actuator dynamics compound this. Real motors have thermal-dependent winding resistance,
+            back-EMF that changes with velocity, and gearbox compliance that varies with load.
+            A motor commanded to produce 20 Nm at low speed on a cold morning may behave differently
+            than at operating temperature. These dynamics are not typically modeled in fast-update
+            rigid body simulators like Isaac Gym or MuJoCo, and they produce correlated errors in
+            torque tracking across an entire joint trajectory.
+          </p>
+
+          <h3 id="contact">Contact Model Failures</h3>
+
+          <p>
+            The largest source of sim2real error in legged locomotion and manipulation is contact.
+            Standard simulators use rigid-body contact: instantaneous, perfectly stiff collisions
+            resolved with impulse-based or penalty-based methods. Real contact is none of these
+            things.
+          </p>
+
+          <p>
+            Real foot–ground contact involves:
+          </p>
+          <ul>
+            <li><strong>Ground compliance.</strong> Grass, gravel, and foam all deform under load.
+            The effective contact stiffness and damping change the timing of leg loading and unloading,
+            which directly affects gait stability.</li>
+            <li><strong>Foot deformation.</strong> Compliant rubber pads on robot feet deform in
+            ways that shift the effective contact point and create a distributed pressure field,
+            not a point contact.</li>
+            <li><strong>Penetration depth and hysteresis.</strong> Soft-body contacts exhibit
+            energy dissipation that is path-dependent — loading and unloading curves differ.
+            This is essentially invisible to a rigid-body simulator.</li>
+          </ul>
+
+          <p>
+            For dexterous manipulation, the problem is even more acute. Object contact during
+            grasping involves multi-point contact patches, fingertip compliance, and grasp
+            stability conditions that depend on contact normal directions that shift as the
+            object moves.
+          </p>
+
+          <h3 id="friction">Friction Model Failures</h3>
+
+          <p>
+            The Coulomb friction model — universally used in rigid-body simulation — is wrong
+            in at least three important ways for robotics applications:
+          </p>
+
+          <ul>
+            <li><strong>Stribeck effect.</strong> At very low relative velocities, friction
+            transitions from static to kinetic through a regime where friction force actually
+            <em>decreases</em> with increasing velocity before increasing again. This produces
+            stick-slip behavior that can destabilize a leg during slow stance phases.</li>
+            <li><strong>Friction anisotropy.</strong> Real surfaces are not isotropic. Terrain
+            like wet grass, grooved surfaces, or sand have direction-dependent friction
+            coefficients. A policy trained on isotropic friction will not correctly anticipate
+            lateral slip forces on these surfaces.</li>
+            <li><strong>Rate-and-state friction.</strong> In granular materials and some soft
+            surfaces, the friction coefficient depends on the recent contact history — how long
+            the surfaces have been in contact and at what relative velocity. This is
+            state-dependent in a way that Coulomb friction cannot capture.</li>
+          </ul>
+
+          <div class="callout insight">
+            <div class="callout-label">Key structural observation</div>
+            All of these error sources — inertia mismatch, actuator dynamics, contact compliance,
+            friction — share a common property: they are <strong>low-dimensional and
+            parametric</strong>. The uncertainty lives in a small number of physical parameters
+            ($\mu_k$, $k_{\text{contact}}$, $I_{\text{body}}$, ...) embedded in a known physical
+            structure. This is precisely what adaptive control is designed to handle.
+          </div>
+
+          <!-- ========== 3. DOMAIN RAND ========== -->
+          <h2 id="domrand">3. What Domain Randomization Can and Cannot Do</h2>
+
+          <p>
+            Domain randomization is genuinely remarkable. If you randomize friction coefficients,
+            ground stiffness, link masses, and motor gains over a wide enough range during training,
+            you obtain policies that transfer to real hardware with surprising reliability.
+            The implicit mechanism is that the policy learns to read the physical regime it is in
+            from proprioceptive and exteroceptive observations, and adjusts its behavior accordingly.
+            This is sometimes called <em>implicit adaptation</em>.
+          </p>
+
+          <p>
+            But DR has two fundamental limitations that are worth naming precisely.
+          </p>
+
+          <p>
+            <strong>Limitation 1: Coverage does not imply identification.</strong> DR ensures
+            (roughly) that the real world falls within the support of your training distribution.
+            But it does not help the deployed policy know <em>where</em> in that distribution it
+            currently is. All environments are implicitly treated as equally likely at every time
+            step. The policy might behave robustly on average, but it cannot optimally specialize
+            its behavior to the current physical parameters because it does not maintain an explicit
+            estimate of them.
+          </p>
+
+          <p>
+            This matters most when the optimal behavior differs significantly across the parameter
+            distribution. A legged robot carrying a 5 kg payload and one carrying a 20 kg payload
+            should use different gait strategies, different foot placement timing, different stance
+            widths. A DR-trained policy will try to hedge between these behaviors, which is
+            suboptimal for both.
+          </p>
+
+          <p>
+            <strong>Limitation 2: Graceful degradation is not guaranteed near distribution
+            boundaries.</strong> Near the edges of the training distribution, the policy has seen
+            fewer examples and its behavior becomes less reliable. More problematically, the policy
+            has no mechanism to detect that it is near a boundary. It does not output uncertainty;
+            it does not slow down or become more conservative; it just applies a learned function
+            to an input that is somewhat out of distribution. This produces hard-to-predict failure
+            modes at exactly the conditions where you most need reliable behavior.
+          </p>
+
+          <div class="callout">
+            <div class="callout-label">Analogy</div>
+            Domain randomization is like training a driver on a variety of road conditions and
+            hoping that transfers. Adaptive control is like equipping the driver with a speedometer,
+            traction display, and road surface sensor — letting them actively read and respond to
+            conditions in real time, with a defined protocol for what to do when conditions are
+            uncertain.
+          </div>
+
+          <!-- ========== 4. ADAPTIVE CONTROL ========== -->
+          <h2 id="adaptive">4. What Adaptive Control Offers</h2>
+
+          <p>
+            Adaptive control addresses the parametric uncertainty problem directly. Rather than
+            training to be robust against all possible uncertainties, the goal is to
+            <em>estimate uncertain parameters online</em> and adjust the controller accordingly.
+          </p>
+
+          <p>
+            Consider a system with dynamics:
+          </p>
+
+          $$\dot{x} = f(x, u, \theta)$$
+
+          <p>
+            where $x$ is state, $u$ is control input, and $\theta \in \mathbb{R}^p$ is a vector
+            of uncertain physical parameters (e.g., link masses, friction coefficients, contact
+            stiffness). In a classical adaptive control framework, you jointly run:
+          </p>
+
+          <ol>
+            <li>A <strong>parameter estimator</strong> that maintains $\hat{\theta}(t)$, updated
+            based on observed prediction errors.</li>
+            <li>A <strong>control law</strong> that uses $\hat{\theta}(t)$ in place of the true
+            $\theta$, and is designed to maintain stability even when $\hat{\theta} \neq \theta$.</li>
+          </ol>
+
+          <p>
+            The stability analysis typically uses a Lyapunov function of the form:
+          </p>
+
+          $$V(e, \tilde{\theta}) = \frac{1}{2} e^T P e + \frac{1}{2\gamma} \tilde{\theta}^T \tilde{\theta}$$
+
+          <p>
+            where $e$ is the tracking error, $\tilde{\theta} = \theta - \hat{\theta}$ is the
+            parameter estimation error, $P \succ 0$ satisfies a Lyapunov equation for the
+            nominal closed-loop system, and $\gamma > 0$ is an adaptation gain. With the right
+            update law for $\hat{\theta}$, one can show $\dot{V} \leq 0$, which gives
+            stability and convergence guarantees for the joint system.
+          </p>
+
+          <p>
+            This is the Model Reference Adaptive Control (MRAC) paradigm. In practice, the
+            guarantees come with assumptions — persistent excitation for parameter convergence,
+            matched uncertainty structure, slow parameter variation — but the core guarantees
+            are more tractable than those of any learned policy.
+          </p>
+
+          <h3 id="l1">L1 Adaptive Control</h3>
+
+          <p>
+            A particularly attractive modern variant is <strong>L1 adaptive control</strong>
+            [<a href="#ref-l1">1</a>]. Classical MRAC has a well-known tension: faster
+            adaptation gains improve parameter estimation speed but tend to inject
+            high-frequency content into the control signal, exciting unmodeled dynamics
+            and potentially destabilizing the system. L1 AC resolves this tension
+            elegantly.
+          </p>
+
+          <p>
+            The key idea is to separate estimation from control via a low-pass filter.
+            The estimator runs at high bandwidth (updating $\hat{\sigma}(t)$, a matched
+            estimate of unmodeled forces/disturbances, very rapidly). The control input
+            is computed as:
+          </p>
+
+          $$u(s) = C(s) \, \hat{\sigma}(s)$$
+
+          <p>
+            where $C(s)$ is a stable low-pass filter. The filter prevents high-frequency
+            estimation content from reaching the actuators, while still allowing the controller
+            to reject disturbances in the frequency band where the control system has authority.
+          </p>
+
+          <p>
+            The crucial result: for a given filter $C(s)$ and adaptation rate $\Gamma$,
+            one can derive an explicit bound on the transient deviation of the
+            actual system from the desired reference model:
+          </p>
+
+          $$\|x - x_{\text{ref}}\|_{\mathcal{L}_\infty} \leq \frac{\|G(s)\|_{\mathcal{L}_1}}{\Gamma}$$
+
+          <p>
+            where $G(s)$ depends on the filter and system structure. This is a
+            <em>pre-deployment guarantee</em>: before you turn on the robot, you know
+            an upper bound on how far the real trajectory can deviate from the reference.
+            For safety-critical systems, this is enormously valuable.
+          </p>
+
+          <div class="callout insight">
+            <div class="callout-label">Why this matters for real hardware</div>
+            With L1 adaptive control, when a quadruped is unexpectedly loaded with an
+            additional payload mid-mission, the controller detects the inertia change within
+            a few hundred milliseconds and compensates — with a certified bound on how bad
+            the transient behavior will be. A DR-trained policy handles this gracefully
+            only if the payload falls within the training distribution, and provides no
+            guarantee on transient quality even then.
+          </div>
+
+          <!-- ========== 5. CONTACT-RICH ========== -->
+          <h2 id="contact-rich">5. Why Contact-Rich Systems Are Special</h2>
+
+          <p>
+            The argument for adaptive control becomes even stronger when you focus on
+            contact-rich systems. Three properties make these systems particularly
+            challenging for pure learning approaches.
+          </p>
+
+          <p>
+            <strong>Contact induces switching dynamics.</strong> A legged robot alternates
+            between contact and flight phases. Each contact event is a discrete, hybrid
+            transition that changes the system's effective dynamics discontinuously.
+            The stance phase has a different Jacobian, a different effective inertia, and
+            a different set of feasible control inputs than the flight phase. Adaptive
+            controllers designed for smooth ODEs do not directly apply here — this is
+            an active research area involving hybrid adaptive control and reset maps.
+          </p>
+
+          <p>
+            <strong>Contact forces are unilateral and friction-constrained.</strong>
+            Ground reaction forces at a foot must lie inside the friction cone:
+          </p>
+
+          $$\sqrt{f_x^2 + f_y^2} \leq \mu \, f_z, \quad f_z \geq 0$$
+
+          <p>
+            Whether a commanded foot force is feasible depends critically on $\mu$,
+            the friction coefficient between foot and ground. Underestimating $\mu$
+            makes the controller over-conservative (wide stance, slow gaits). Overestimating
+            $\mu$ causes slipping — a discrete, catastrophic failure. On-the-fly estimation
+            of $\mu$ from observed foot forces and velocities is a natural adaptive
+            estimation problem.
+          </p>
+
+          <p>
+            <strong>Manipulation contact involves unknown object properties.</strong>
+            For dexterous manipulation of novel objects, the controller does not know:
+          </p>
+          <ul>
+            <li>Object mass and inertia (needed for dynamic manipulation planning)</li>
+            <li>Surface friction at contact points (determines grasp stability)</li>
+            <li>Object compliance (affects deformable object manipulation)</li>
+          </ul>
+
+          <p>
+            In regrasping, in-hand manipulation, and tool use, these unknowns must be
+            estimated online from fingertip force/torque feedback during the manipulation
+            itself. This is an adaptive identification problem, and classical methods
+            (recursive least squares, extended Kalman filters on physical parameters)
+            provide both estimates and uncertainty bounds that a neural network does not.
+          </p>
+
+          <div class="callout">
+            <div class="callout-label">Concrete failure mode</div>
+            Consider a robot tasked with picking up an object of unknown mass. A learned
+            policy may have been trained on objects from 0.1–2 kg. At test time, a
+            3 kg object causes the controller to generate insufficient gripping force,
+            leading to slip. An adaptive controller that estimates object mass from the
+            first 200 ms of lift attempt and updates its grip force accordingly will
+            succeed at 3 kg — and at 5 kg — without any re-training.
+          </div>
+
+          <!-- ========== 6. HYBRID ========== -->
+          <h2 id="hybrid">6. Learning + Adaptive Control: Better Together</h2>
+
+          <p>
+            The most promising near-term direction is not "learning vs. adaptive control"
+            but <em>integrating both</em>. The two approaches have complementary strengths:
+          </p>
+
+          <ul>
+            <li><strong>Learned policies</strong> handle high-dimensional sensory inputs,
+            complex task structure, multi-modal behavior, and situations that are too complex
+            to specify analytically (terrain navigation, whole-body contact planning).</li>
+            <li><strong>Adaptive controllers</strong> handle structured physical uncertainty
+            at the level of forces, torques, and physical parameters — with online estimates,
+            principled update laws, and stability guarantees.</li>
+          </ul>
+
+          <p>
+            A natural architecture: a learned policy operates at the level of task-space
+            commands or centroidal trajectories, while an adaptive layer compensates for
+            physical model errors at the joint/force level before those commands reach
+            the hardware.
+          </p>
+
+          <p>
+            This is the approach I worked on in the OCRL course project at CMU: augmenting
+            the <a href="https://arxiv.org/abs/2306.09557">CaJun</a> learned centroidal
+            locomotion controller with an L1 adaptive layer to handle unexpected payloads.
+            The learned controller handles gait selection, balance, and high-level agility;
+            the adaptive layer handles the structured inertia uncertainty introduced by
+            varying payload mass. The two layers do not need to know about each other's
+            internals — the interface is a clean torque command signal.
+          </p>
+
+          <p>
+            A different but related approach is taken in our work on
+            <a href="https://lecar-lab.github.io/spi-active_/">SPI-Active</a> (CoRL 2025):
+            instead of adapting online during deployment, we do careful system identification
+            <em>before</em> deployment using active exploration. By actively exciting the
+            robot dynamics in simulation-informed ways, we identify the physical parameters
+            of the specific real robot hardware (not just a nominal model) and build a
+            calibrated simulator for policy training. This is adaptive identification
+            in service of sim2real transfer rather than runtime adaptation.
+          </p>
+
+          <p>
+            Similarly, <a href="https://agile.human2humanoid.com/">ASAP</a> (RSS 2025) addresses
+            the gap between simulation and real humanoid hardware by aligning the
+            physics of the simulator to the real robot through parameter estimation —
+            the same philosophy: treat the physical gap as something to estimate,
+            not merely randomize over.
+          </p>
+
+          <!-- ========== 7. OPEN QUESTIONS ========== -->
+          <h2 id="open">7. Open Questions</h2>
+
+          <p>
+            There is a lot of interesting open work at the intersection of adaptive control
+            and robot learning. Here are the questions I find most compelling.
+          </p>
+
+          <p>
+            <strong>Adaptive control for hybrid systems.</strong> Classical adaptive theory was
+            developed for smooth ODEs. Legged locomotion is fundamentally a hybrid dynamical
+            system with discrete contact events. Extending Lyapunov-based stability guarantees
+            to cover contact transitions — including the transient behavior during impact — is
+            not fully solved. Some progress exists in hybrid adaptive control, but much remains
+            to be done for the kinds of fast, dynamic gaits modern legged robots achieve.
+          </p>
+
+          <p>
+            <strong>Contact-consistent estimation.</strong> Adaptive estimators should explicitly
+            respect the physical constraints imposed by contact — unilateral normal forces,
+            friction cone membership — when estimating surface properties and object parameters.
+            Standard least-squares estimators do not enforce these constraints, which can produce
+            physically inconsistent estimates.
+          </p>
+
+          <p>
+            <strong>Meta-learning and fast adaptation.</strong> Can we combine the representational
+            power of neural networks with the structure of adaptive control? Methods like MAML
+            [<a href="#ref-maml">2</a>] and RMA [<a href="#ref-rma">3</a>] provide fast
+            adaptation via learned update rules, but without the closed-loop stability guarantees
+            of classical adaptive control. Bridging this gap — perhaps by learning an adaptation
+            law that is provably stable — is an open problem.
+          </p>
+
+          <p>
+            <strong>When does learning beat adaptation?</strong> Not all uncertainty is
+            low-dimensional and parametric. Visual uncertainty, terrain topology, and object shape
+            are high-dimensional and may be better handled by learning. Characterizing which parts
+            of the uncertainty should be handled by adaptive estimation (physics parameters) and
+            which by learned representations (appearance, shape, semantics) is a useful
+            framing for designing hybrid systems.
+          </p>
+
+          <!-- ========== 8. CONCLUSION ========== -->
+          <h2 id="conclusion">8. Conclusion</h2>
+
+          <p>
+            Adaptive control is not a relic of the pre-deep-learning era. It is a framework for
+            handling <em>structured, parametric physical uncertainty</em> — and physical systems
+            will always have this kind of uncertainty, regardless of how powerful our learned
+            policies become. The key insight is that the sim2real gap has structure: it lives
+            in a low-dimensional space of physical parameters embedded in known physical equations.
+            This structure can be exploited by adaptive estimators in ways that domain randomization
+            cannot.
+          </p>
+
+          <p>
+            For contact-rich systems — legged robots operating across varying terrain, dexterous
+            hands manipulating novel objects — this matters most. Contact dynamics are the
+            hardest to simulate accurately, and errors in contact models produce the most
+            consequential failures at deployment time. Online estimation of contact and object
+            properties is not just theoretically appealing; it is practically necessary for
+            reliable deployment.
+          </p>
+
+          <p>
+            The most capable real-robot systems of the next few years will likely combine:
+          </p>
+          <ul>
+            <li>Large-scale learned policies for behavior, perception, and high-level task structure;</li>
+            <li>Adaptive control layers for online physical uncertainty estimation with principled guarantees;</li>
+            <li>Careful sim2real pipelines that minimize the gap through system identification before deployment.</li>
+          </ul>
+
+          <p>
+            The next posts in this series will go deeper: a technical treatment of L1 adaptive
+            control and its application to augmenting learned locomotion controllers, followed
+            by a discussion of how online adaptation interacts with contact-rich manipulation.
+          </p>
+
+          <!-- ========== SERIES NAV ========== -->
+          <div class="series-nav">
+            <div class="series-nav-label">Series: Adaptive Control &amp; Sim2Real</div>
+            <div class="series-nav-title">In this series</div>
+            <ul class="series-post-list">
+              <li class="current">Part 1: Why Bother with Adaptive Control? (this post)</li>
+              <li>Part 2: L1 Adaptive Control — Theory and Intuition <em>(coming soon)</em></li>
+              <li>Part 3: Contact-Consistent Online Estimation <em>(coming soon)</em></li>
+              <li>Part 4: Augmenting Learned Controllers with Adaptive Layers <em>(coming soon)</em></li>
+            </ul>
+          </div>
+
+          <!-- ========== REFERENCES ========== -->
+          <section class="references" id="references">
+            <h2>References</h2>
+            <ol>
+              <li id="ref-l1">
+                N. Hovakimyan and C. Cao,
+                <em>L1 Adaptive Control Theory: Guaranteed Robustness with Fast Adaptation.</em>
+                SIAM, 2010.
+              </li>
+              <li id="ref-maml">
+                C. Finn, P. Abbeel, and S. Levine,
+                "Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks."
+                <em>ICML</em>, 2017.
+                <a href="https://arxiv.org/abs/1703.03400">[arXiv]</a>
+              </li>
+              <li id="ref-rma">
+                A. Kumar, Z. Fu, D. Pathak, and J. Malik,
+                "RMA: Rapid Motor Adaptation for Legged Robots."
+                <em>RSS</em>, 2021.
+                <a href="https://arxiv.org/abs/2107.04034">[arXiv]</a>
+              </li>
+              <li>
+                T. He et al.,
+                "ASAP: Aligning Simulation and Real-World Physics for Learning Agile Humanoid Whole-Body Skills."
+                <em>RSS</em>, 2025.
+                <a href="https://arxiv.org/abs/2502.01143">[arXiv]</a>
+              </li>
+              <li>
+                N. Sobanbabu, G. He, T. He, Y. Yang, G. Shi,
+                "Sampling-Based System Identification with Active Exploration for Legged Robot Sim2Real Learning."
+                <em>CoRL</em>, 2025 (Oral).
+                <a href="https://arxiv.org/abs/2505.14266">[arXiv]</a>
+              </li>
+              <li>
+                Z. Xie, X. Da, B. Babich, A. Garg, and M. van de Panne,
+                "Glide: Generalizable Quadrupedal Locomotion in Diverse Environments with a Centroidal Model."
+                <em>CoRL</em>, 2023. (CaJun controller referenced above:
+                <a href="https://arxiv.org/abs/2306.09557">[arXiv]</a>)
+              </li>
+            </ol>
+          </section>
+
+        </div> <!-- /post-body -->
+
+        <footer class="post-footer">
+          Template from <a href="https://jonbarron.info/">jonbarron</a>.
+          Blog by <a href="../../index.html">Nikhil Sobanbabu</a>.
+        </footer>
+
+      </article>
+    </div> <!-- /post-layout -->
+  </div> <!-- /blog-page -->
+
+  <!-- TOC scroll-spy -->
+  <script>
+    (function () {
+      var headings = document.querySelectorAll('.post-body h2[id], .post-body h3[id]');
+      var tocLinks = document.querySelectorAll('#toc a');
+
+      function onScroll() {
+        var scrollY = window.scrollY + 90;
+        var current = '';
+        headings.forEach(function (h) {
+          if (h.offsetTop <= scrollY) current = h.id;
+        });
+        tocLinks.forEach(function (a) {
+          a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+        });
+      }
+
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+    })();
+  </script>
+
+</body>
+</html>
